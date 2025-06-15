@@ -31,7 +31,7 @@ func main() {
 
 	sam.Hello(conn)
 
-	if _, err = os.Stat("./storage/users/identity.json"); err != nil {
+	if _, err = os.Stat("../storage/users/identity.json"); err != nil {
 		fmt.Println("No saved identity found, creating new one")
 		identity, err = sam.CreateDestination(conn)
 		if err != nil {

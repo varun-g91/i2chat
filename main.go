@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"i2chat/internal/toolset"
 	"i2chat/sam"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +18,7 @@ var wg sync.WaitGroup
 var (
 	identity sam.Identity
 	samAddr  string = "127.0.0.1:7656"
+	session  sam.SAMSession
 )
 
 func main() {
@@ -31,7 +32,12 @@ func main() {
 
 	sam.Hello(conn)
 
-	if _, err = os.Stat("../storage/users/identity.json"); err != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	identityPath := filepath.Join(cwd, "storage", "users", "identity.json")
+	if _, err = os.Stat(identityPath); err != nil {
 		fmt.Println("No saved identity found, creating new one")
 		identity, err = sam.CreateDestination(conn)
 		if err != nil {
@@ -58,11 +64,26 @@ func main() {
 		pubDestShort = pubDestShort[:50] + "..."
 	}
 
+	scanner := bufio.NewScanner(os.Stdin)
+
+	fmt.Printf("Enter the session id to connect to: ")
+	scanner.Scan()
+	sessionId := strings.TrimSpace(scanner.Text())
+	session := sam.SAMSession{
+		ID:       sessionId,
+		Identity: identity,
+		Conn:     conn,
+	}
+	err = sam.CreateStreamSession(&session)
+	if err != nil {
+		fmt.Println("Unable to crease SAM session: ", err)
+		return
+	}
+	fmt.Println("Session successfully created!")
+
 	operations := []string{
-		"1. CREATE SESSION",
-		"2. CONVERT DESTIANTION TO PUBLIC ADDRESS",
-		"3. ACCEPT INCOMING STREAMS",
-		"4. CONNECT TO A STREAM",
+		"1. ACCEPT INCOMING STREAMS",
+		"2. CONNECT TO A STREAM",
 	}
 
 	fmt.Printf("Choose from the following operations:\n")
@@ -70,7 +91,7 @@ func main() {
 		fmt.Println(operation)
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner = bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	answer := strings.TrimSpace(scanner.Text())
 	ans_int, err := strconv.Atoi(answer)
@@ -81,25 +102,6 @@ func main() {
 
 	switch ans_int {
 	case 1:
-		err = sam.CreateStreamSession(conn, identity)
-		if err != nil {
-			fmt.Println("Unable to crease SAM session: ", err)
-			return
-		}
-		fmt.Println("Session successfully created!")
-		break
-	case 2:
-		var pubDest string = strings.TrimRight(identity.PubDest, "=")
-		fmt.Println("pubDest: ", pubDest)
-		publicAddress, err := toolset.ConvertPubDestToB32(pubDest)
-		if err != nil {
-			fmt.Println("Error converting destination into public address: ", err)
-			return
-		}
-		fmt.Printf("Your public address is: %s", publicAddress)
-		break
-
-	case 3:
 		errChan := make(chan error)
 		wg.Add(1)
 		fmt.Printf("Enter the stream id to accept: ")
@@ -116,7 +118,7 @@ func main() {
 		}
 		fmt.Println("Successfully accepted incoming stream!")
 		break
-	case 4:
+	case 2:
 		errChan := make(chan error)
 		wg.Add(1)
 		fmt.Printf("Enter the stream id to connect to: ")

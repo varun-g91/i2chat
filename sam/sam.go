@@ -12,9 +12,17 @@ import (
 	"sync"
 )
 
+var samAddr string = "127.0.0.1:7656"
+
 type Identity struct {
 	PubDest string `json:"pubDest"`
 	PrivKey string `json:"privKey"`
+}
+
+type SAMSession struct {
+	ID       string
+	Identity Identity
+	Conn     net.Conn
 }
 
 var identityCount int
@@ -97,7 +105,13 @@ func SaveIdentity(identity Identity) error {
 		fmt.Println("Error marshalling to JSON: ", err)
 		return err
 	}
-	err = os.WriteFile("../storage/users/identity.json", data, 0644)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	identityPath := filepath.Join(cwd, "storage", "users", "identity.json")
+
+	err = os.WriteFile(identityPath, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing json to file: ", err)
 		return err
@@ -106,17 +120,17 @@ func SaveIdentity(identity Identity) error {
 	return nil
 }
 
-func CreateStreamSession(conn net.Conn, identity Identity) error {
+func CreateStreamSession(s *SAMSession) error {
 	// Fixed: Added space before SIGNATURE_TYPE
-	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=default DESTINATION=%s SIGNATURE_TYPE=7\n", identity.PrivKey)
+	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=default DESTINATION=%s SIGNATURE_TYPE=7\n", s.Identity.PrivKey)
 
-	_, err := conn.Write([]byte(cmd))
+	_, err := s.Conn.Write([]byte(cmd))
 	if err != nil {
 		fmt.Println("Error creating SAM session: ", err)
 		return err
 	}
 
-	reader = bufio.NewReader(conn)
+	reader = bufio.NewReader(s.Conn)
 	resp, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Error in createStreamSession while reading response: ", err)
@@ -130,14 +144,14 @@ func CreateStreamSession(conn net.Conn, identity Identity) error {
 		return errors.New("Failed to create session")
 	} else {
 		// Session created successfully, use the public destination from identity
-		fmt.Printf("Session created successfully with public destination: %s\n", identity.PubDest)
+		fmt.Printf("Session created successfully with public destination: %s\n", s.Identity.PubDest)
 		return nil
 	}
 }
 
 func AcceptIncomingStream(conn net.Conn, id string, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	cmd := "STREAM ACCEPT ID=" + id
+	cmd := "STREAM ACCEPT ID=" + id + "\n"
 	_, err := conn.Write([]byte(cmd))
 	if err != nil {
 		fmt.Printf("Could not accept incoming stream: %s\n", err)
@@ -155,12 +169,18 @@ func AcceptIncomingStream(conn net.Conn, id string, wg *sync.WaitGroup) error {
 
 func ConnectToExternalStream(conn net.Conn, id string, destination string, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	cmd := "STREAM CONNECT ID=" + id + "DESTINATION=" + destination
+	cmd := "STREAM CONNECT ID=" + id + "DESTINATION=" + destination + "\n"
 	_, err := conn.Write([]byte(cmd))
 	if err != nil {
 		fmt.Println("Could not connect to external stream: ", err)
 		return err
 	}
-	fmt.Println("Successfully connected to external stream of id: ", id)
+	reader = bufio.NewReader(conn)
+	resp, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Could not read response: %s\n", err)
+		return err
+	}
+	fmt.Printf("Successfully connected to external stream of id: %s and the respone is: %s\n", id, resp)
 	return nil
 }

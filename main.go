@@ -4,142 +4,70 @@ import (
 	"bufio"
 	"fmt"
 	"i2chat/sam"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
-)
-
-var wg sync.WaitGroup
-
-var (
-	identity sam.Identity
-	samAddr  string = "127.0.0.1:7656"
-	session  sam.SAMSession
 )
 
 func main() {
-	conn, err := net.DialTimeout("tcp", samAddr, 3*time.Second)
-	if err != nil {
-		fmt.Println("Failed to connect to SAM bridge: ", err)
-		return
-	}
-	fmt.Println("Connected to SAM bridge at: ", samAddr)
-	defer conn.Close()
+	var id sam.Identity
+	var err error
 
-	sam.Hello(conn)
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return
-	}
-	identityPath := filepath.Join(cwd, "storage", "users", "identity.json")
-	if _, err = os.Stat(identityPath); err != nil {
-		fmt.Println("No saved identity found, creating new one")
-		identity, err = sam.CreateDestination(conn)
+	identityPath := filepath.Join("storage", "users", "identity.json")
+	if _, err = os.Stat(identityPath); os.IsNotExist(err) {
+		id, err = sam.CreateDestination()
 		if err != nil {
-			fmt.Println("Error occured creating identity: ", err)
+			fmt.Println("Failed to create identity:", err)
 			return
 		}
-		err = sam.SaveIdentity(identity)
-		if err != nil {
-			fmt.Println("Error occurred saving identity: ", err)
+		if err := sam.SaveIdentity(id); err != nil {
+			fmt.Println("Failed to save identity:", err)
 			return
 		}
 	} else {
-		identity, err = sam.LoadIdentity()
+		id, err = sam.LoadIdentity()
 		if err != nil {
-			fmt.Println("An error occurred while trying to load existing identity: ", err)
+			fmt.Println("Failed to load identity:", err)
 			return
 		}
-		fmt.Println("Using existing identity:")
-		fmt.Println("Public Destination: ", identity.PubDest)
-	}
-
-	pubDestShort := identity.PubDest
-	if len(pubDestShort) > 50 {
-		pubDestShort = pubDestShort[:50] + "..."
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
-
-	fmt.Printf("Enter the session id to connect to: ")
+	fmt.Print("Enter session ID: ")
 	scanner.Scan()
-	sessionId := strings.TrimSpace(scanner.Text())
-	session := sam.SAMSession{
-		ID:       sessionId,
-		Identity: identity,
-		Conn:     conn,
-	}
-	err = sam.CreateStreamSession(&session)
-	if err != nil {
-		fmt.Println("Unable to crease SAM session: ", err)
+	sessionID := strings.TrimSpace(scanner.Text())
+
+	if err := sam.CreateStreamSession(sessionID, id.PrivKey); err != nil {
+		fmt.Println("Session create failed:", err)
 		return
 	}
-	fmt.Println("Session successfully created!")
+	fmt.Println("Session created.")
 
-	operations := []string{
-		"1. ACCEPT INCOMING STREAMS",
-		"2. CONNECT TO A STREAM",
-	}
-
-	fmt.Printf("Choose from the following operations:\n")
-	for _, operation := range operations {
-		fmt.Println(operation)
-	}
-
-	scanner = bufio.NewScanner(os.Stdin)
+	fmt.Println("Choose operation:")
+	fmt.Println("1. Accept Stream")
+	fmt.Println("2. Connect to Stream")
 	scanner.Scan()
-	answer := strings.TrimSpace(scanner.Text())
-	ans_int, err := strconv.Atoi(answer)
-	if err != nil {
-		fmt.Println("Enter a valid number")
-		return
-	}
+	choice, _ := strconv.Atoi(scanner.Text())
 
-	switch ans_int {
+	switch choice {
 	case 1:
-		errChan := make(chan error)
-		wg.Add(1)
-		fmt.Printf("Enter the stream id to accept: ")
+		fmt.Print("Enter stream ID to accept: ")
 		scanner.Scan()
-		id := strings.TrimSpace(scanner.Text())
-		go func() {
-			err := sam.AcceptIncomingStream(conn, id, &wg)
-			errChan <- err
-		}()
-		err := <-errChan
-		if err != nil {
-			fmt.Println("Error accepting stream: ", err)
-			return
+		if err := sam.AcceptStream(scanner.Text()); err != nil {
+			fmt.Println("Accept failed:", err)
 		}
-		fmt.Println("Successfully accepted incoming stream!")
-		break
 	case 2:
-		errChan := make(chan error)
-		wg.Add(1)
-		fmt.Printf("Enter the stream id to connect to: ")
+		fmt.Print("Enter stream ID to connect: ")
 		scanner.Scan()
-		id := strings.TrimSpace(scanner.Text())
-		fmt.Printf("Enter the destination to connect to: ")
+		streamID := scanner.Text()
+		fmt.Print("Enter destination to connect to: ")
 		scanner.Scan()
-		dest := strings.TrimSpace(scanner.Text())
-		go func() {
-			err := sam.ConnectToExternalStream(conn, id, dest, &wg)
-			errChan <- err
-		}()
-		err := <-errChan
-		if err != nil {
-			fmt.Println("Error connecting to external stream: ", err)
-			return
+		dest := scanner.Text()
+		if err := sam.ConnectToStream(streamID, dest); err != nil {
+			fmt.Println("Connect failed:", err)
 		}
-		fmt.Println("Successfully connected to external stream!")
-		break
 	default:
-		fmt.Printf("%d is an invalid choice\n", ans_int)
-		break
+		fmt.Println("Invalid choice.")
 	}
 }

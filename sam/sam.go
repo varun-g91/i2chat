@@ -9,178 +9,157 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"time"
 )
 
-var samAddr string = "127.0.0.1:7656"
+const samAddr = "127.0.0.1:7656"
 
 type Identity struct {
 	PubDest string `json:"pubDest"`
 	PrivKey string `json:"privKey"`
 }
 
-type SAMSession struct {
-	ID       string
-	Identity Identity
-	Conn     net.Conn
-}
-
-var identityCount int
-var reader *bufio.Reader
-
-func Hello(conn net.Conn) {
-	hello := "HELLO VERSION MIN=3.1 MAX=3.1\n"
-	_, err := conn.Write([]byte(hello))
+func hello(conn net.Conn) error {
+	_, err := conn.Write([]byte("HELLO VERSION MIN=3.1 MAX=3.1\n"))
 	if err != nil {
-		fmt.Println("Failed to perfom SAM handshake: ", err)
-		return
+		return err
 	}
-	reader = bufio.NewReader(conn)
+	reader := bufio.NewReader(conn)
 	resp, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("Failed to read resp: ", err)
-		return
+		return err
 	}
-	fmt.Println("SAM resp: ", resp)
+	if !strings.Contains(resp, "HELLO REPLY RESULT=OK") {
+		return fmt.Errorf("HELLO failed: %s", resp)
+	}
+	return nil
 }
 
-func CreateDestination(conn net.Conn) (Identity, error) {
-	cmd := "DEST GENERATE SIGNATURE_TYPE=7\n"
-	_, err := conn.Write([]byte(cmd))
+func connectToSAM() (net.Conn, *bufio.Reader, error) {
+	conn, err := net.DialTimeout("tcp", samAddr, 3*time.Second)
 	if err != nil {
-		fmt.Println("Failed to generate destination: ", err)
+		return nil, nil, err
+	}
+	if err := hello(conn); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	reader := bufio.NewReader(conn)
+	return conn, reader, nil
+}
+
+func CreateDestination() (Identity, error) {
+	conn, reader, err := connectToSAM()
+	if err != nil {
 		return Identity{}, err
 	}
-	reader = bufio.NewReader(conn)
+	defer conn.Close()
+
+	_, err = conn.Write([]byte("DEST GENERATE SIGNATURE_TYPE=7\n"))
+	if err != nil {
+		return Identity{}, err
+	}
 	resp, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("Failed to read DEST GENERATE resp: ", err)
 		return Identity{}, err
 	}
-	resp = strings.TrimSpace(resp)
-	if !strings.HasPrefix(resp, "DEST REPLY") {
-		fmt.Println("Unexpected error", resp)
-		return Identity{}, err
-	}
-	parts := strings.Fields(resp)
-	var pubKey, privKey string
-	for _, part := range parts {
-		if strings.HasPrefix(part, "PUB=") {
-			pubKey = strings.TrimPrefix(part, "PUB=")
+	fields := strings.Fields(resp)
+	var pub, priv string
+	for _, f := range fields {
+		if strings.HasPrefix(f, "PUB=") {
+			pub = strings.TrimPrefix(f, "PUB=")
 		}
-		if strings.HasPrefix(part, "PRIV=") {
-			privKey = strings.TrimPrefix(part, "PRIV=")
+		if strings.HasPrefix(f, "PRIV=") {
+			priv = strings.TrimPrefix(f, "PRIV=")
 		}
 	}
-	fmt.Println("Public Destination: ", pubKey)
-	fmt.Println("Private key: ", privKey)
-	return Identity{PubDest: pubKey, PrivKey: privKey}, nil
+	if pub == "" || priv == "" {
+		return Identity{}, errors.New("failed to extract keys")
+	}
+	return Identity{PubDest: pub, PrivKey: priv}, nil
 }
 
 func LoadIdentity() (Identity, error) {
-	cwd, err := os.Getwd()
+	data, err := os.ReadFile(filepath.Join("storage", "users", "identity.json"))
 	if err != nil {
 		return Identity{}, err
 	}
-	identityPath := filepath.Join(cwd, "storage", "users", "identity.json")
-
-	data, err := os.ReadFile(identityPath)
-	if err != nil {
-		return Identity{}, err
-	}
-
-	var identity Identity
-	err = json.Unmarshal(data, &identity)
-	if err != nil {
-		return Identity{}, err
-	}
-
-	fmt.Println("Loaded existing identity from:", identityPath)
-	return identity, nil
+	var id Identity
+	err = json.Unmarshal(data, &id)
+	return id, err
 }
 
-func SaveIdentity(identity Identity) error {
-	data, err := json.MarshalIndent(identity, "", " ")
-	if err != nil {
-		fmt.Println("Error marshalling to JSON: ", err)
-		return err
-	}
-	cwd, err := os.Getwd()
+func SaveIdentity(id Identity) error {
+	data, err := json.MarshalIndent(id, "", "  ")
 	if err != nil {
 		return err
 	}
-	identityPath := filepath.Join(cwd, "storage", "users", "identity.json")
-
-	err = os.WriteFile(identityPath, data, 0644)
-	if err != nil {
-		fmt.Println("Error writing json to file: ", err)
-		return err
-	}
-	fmt.Println("Identity successfuly saved to identity.json")
-	return nil
+	path := filepath.Join("storage", "users")
+	os.MkdirAll(path, 0755)
+	return os.WriteFile(filepath.Join(path, "identity.json"), data, 0644)
 }
 
-func CreateStreamSession(s *SAMSession) error {
-	// Fixed: Added space before SIGNATURE_TYPE
-	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=default DESTINATION=%s SIGNATURE_TYPE=7\n", s.Identity.PrivKey)
-
-	_, err := s.Conn.Write([]byte(cmd))
+func CreateStreamSession(sessionID string, privKey string) error {
+	conn, reader, err := connectToSAM()
 	if err != nil {
-		fmt.Println("Error creating SAM session: ", err)
 		return err
 	}
+	defer conn.Close()
 
-	reader = bufio.NewReader(s.Conn)
+	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=%s DESTINATION=%s SIGNATURE_TYPE=7\n", sessionID, privKey)
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return err
+	}
 	resp, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("Error in createStreamSession while reading response: ", err)
 		return err
 	}
-
-	resp = strings.TrimSpace(resp)
-
 	if !strings.Contains(resp, "RESULT=OK") {
-		fmt.Printf("Session creation failed with response: %s\n", resp)
-		return errors.New("Failed to create session")
-	} else {
-		// Session created successfully, use the public destination from identity
-		fmt.Printf("Session created successfully with public destination: %s\n", s.Identity.PubDest)
-		return nil
+		return fmt.Errorf("session failed: %s", resp)
 	}
-}
-
-func AcceptIncomingStream(conn net.Conn, id string, wg *sync.WaitGroup) error {
-	defer wg.Done()
-	cmd := "STREAM ACCEPT ID=" + id + "\n"
-	_, err := conn.Write([]byte(cmd))
-	if err != nil {
-		fmt.Printf("Could not accept incoming stream: %s\n", err)
-		return err
-	}
-	reader = bufio.NewReader(conn)
-	resp, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Printf("Could not read response: %s\n", err)
-		return err
-	}
-	fmt.Println("Incoming stream accepted, response: ", resp)
 	return nil
 }
 
-func ConnectToExternalStream(conn net.Conn, id string, destination string, wg *sync.WaitGroup) error {
-	defer wg.Done()
-	cmd := "STREAM CONNECT ID=" + id + "DESTINATION=" + destination + "\n"
-	_, err := conn.Write([]byte(cmd))
+func AcceptStream(sessionID string) error {
+	conn, reader, err := connectToSAM()
 	if err != nil {
-		fmt.Println("Could not connect to external stream: ", err)
 		return err
 	}
-	reader = bufio.NewReader(conn)
+	defer conn.Close()
+
+	cmd := fmt.Sprintf("STREAM ACCEPT ID=%s\n", sessionID)
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return err
+	}
 	resp, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Printf("Could not read response: %s\n", err)
 		return err
 	}
-	fmt.Printf("Successfully connected to external stream of id: %s and the respone is: %s\n", id, resp)
+	fmt.Println("ACCEPTED: ", resp)
+	return nil
+}
+
+func ConnectToStream(sessionID, dest string) error {
+	conn, reader, err := connectToSAM()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	cmd := fmt.Sprintf("STREAM CONNECT ID=%s DESTINATION=%s\n", sessionID, dest)
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return err
+	}
+	resp, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(resp, "RESULT=OK") {
+		return fmt.Errorf("CONNECT failed: %s", resp)
+	}
+	fmt.Println("CONNECTED: ", resp)
 	return nil
 }

@@ -53,19 +53,14 @@ func main() {
 
 	switch choice {
 	case 1:
-		fmt.Print("Enter stream ID to accept: ")
-		scanner.Scan()
-		if err := sam.AcceptStream(conn, reader, scanner.Text()); err != nil {
+		if err := sam.AcceptStream(conn, reader, sessionID.String()); err != nil {
 			fmt.Println("Accept failed:", err)
 		}
 	case 2:
-		fmt.Print("Enter stream ID to connect: ")
-		scanner.Scan()
-		streamID := scanner.Text()
 		fmt.Print("Enter destination to connect to: ")
 		scanner.Scan()
 		dest := scanner.Text()
-		if err := sam.ConnectToStream(conn, reader, streamID, dest); err != nil {
+		if err := sam.ConnectToStream(conn, reader, sessionID.String(), dest); err != nil {
 			fmt.Println("Connect failed:", err)
 		}
 	default:

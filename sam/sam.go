@@ -49,9 +49,7 @@ func ConnectToSAM() (net.Conn, *bufio.Reader, error) {
 }
 
 func CreateDestination(conn net.Conn, reader *bufio.Reader) (Identity, error) {
-	defer conn.Close()
-
-	_, err = conn.Write([]byte("DEST GENERATE SIGNATURE_TYPE=7\n"))
+	_, err := conn.Write([]byte("DEST GENERATE SIGNATURE_TYPE=7\n"))
 	if err != nil {
 		return Identity{}, err
 	}
@@ -95,15 +93,9 @@ func SaveIdentity(id Identity) error {
 	return os.WriteFile(filepath.Join(path, "identity.json"), data, 0644)
 }
 
-func CreateStreamSession(sessionID string, privKey string) error {
-	conn, reader, err := connectToSAM()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
+func CreateStreamSession(conn net.Conn, reader *bufio.Reader, sessionID string, privKey string) error {
 	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=%s DESTINATION=%s SIGNATURE_TYPE=7\n", sessionID, privKey)
-	_, err = conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(cmd))
 	if err != nil {
 		return err
 	}
@@ -117,15 +109,9 @@ func CreateStreamSession(sessionID string, privKey string) error {
 	return nil
 }
 
-func AcceptStream(sessionID string) error {
-	conn, reader, err := connectToSAM()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
+func AcceptStream(conn net.Conn, reader *bufio.Reader, sessionID string) error {
 	cmd := fmt.Sprintf("STREAM ACCEPT ID=%s\n", sessionID)
-	_, err = conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(cmd))
 	if err != nil {
 		return err
 	}
@@ -137,15 +123,9 @@ func AcceptStream(sessionID string) error {
 	return nil
 }
 
-func ConnectToStream(sessionID, dest string) error {
-	conn, reader, err := connectToSAM()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
+func ConnectToStream(conn net.Conn, reader *bufio.Reader, sessionID, dest string) error {
 	cmd := fmt.Sprintf("STREAM CONNECT ID=%s DESTINATION=%s\n", sessionID, dest)
-	_, err = conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(cmd))
 	if err != nil {
 		return err
 	}

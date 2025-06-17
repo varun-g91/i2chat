@@ -35,7 +35,7 @@ func hello(conn net.Conn) error {
 	return nil
 }
 
-func connectToSAM() (net.Conn, *bufio.Reader, error) {
+func ConnectToSAM() (net.Conn, *bufio.Reader, error) {
 	conn, err := net.DialTimeout("tcp", samAddr, 3*time.Second)
 	if err != nil {
 		return nil, nil, err
@@ -48,11 +48,7 @@ func connectToSAM() (net.Conn, *bufio.Reader, error) {
 	return conn, reader, nil
 }
 
-func CreateDestination() (Identity, error) {
-	conn, reader, err := connectToSAM()
-	if err != nil {
-		return Identity{}, err
-	}
+func CreateDestination(conn net.Conn, reader *bufio.Reader) (Identity, error) {
 	defer conn.Close()
 
 	_, err = conn.Write([]byte("DEST GENERATE SIGNATURE_TYPE=7\n"))

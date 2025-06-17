@@ -14,9 +14,12 @@ func main() {
 	var id sam.Identity
 	var err error
 
+	conn, reader, err := sam.ConnectToSAM()
+	defer conn.Close()
+
 	identityPath := filepath.Join("storage", "users", "identity.json")
 	if _, err = os.Stat(identityPath); os.IsNotExist(err) {
-		id, err = sam.CreateDestination()
+		id, err = sam.CreateDestination(conn, reader)
 		if err != nil {
 			fmt.Println("Failed to create identity:", err)
 			return
@@ -38,7 +41,7 @@ func main() {
 	scanner.Scan()
 	sessionID := strings.TrimSpace(scanner.Text())
 
-	if err := sam.CreateStreamSession(sessionID, id.PrivKey); err != nil {
+	if err := sam.CreateStreamSession(conn, reader, sessionID, id.PrivKey); err != nil {
 		fmt.Println("Session create failed:", err)
 		return
 	}
@@ -54,7 +57,7 @@ func main() {
 	case 1:
 		fmt.Print("Enter stream ID to accept: ")
 		scanner.Scan()
-		if err := sam.AcceptStream(scanner.Text()); err != nil {
+		if err := sam.AcceptStream(conn, reader, scanner.Text()); err != nil {
 			fmt.Println("Accept failed:", err)
 		}
 	case 2:
@@ -64,7 +67,7 @@ func main() {
 		fmt.Print("Enter destination to connect to: ")
 		scanner.Scan()
 		dest := scanner.Text()
-		if err := sam.ConnectToStream(streamID, dest); err != nil {
+		if err := sam.ConnectToStream(conn, reader, streamID, dest); err != nil {
 			fmt.Println("Connect failed:", err)
 		}
 	default:

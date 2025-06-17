@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"i2chat/sam/commands"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type Identity struct {
 }
 
 func hello(conn net.Conn) error {
-	_, err := conn.Write([]byte("HELLO VERSION MIN=3.1 MAX=3.1\n"))
+	_, err := conn.Write([]byte(commands.Hello()))
 	if err != nil {
 		return err
 	}
@@ -49,7 +50,7 @@ func ConnectToSAM() (net.Conn, *bufio.Reader, error) {
 }
 
 func CreateDestination(conn net.Conn, reader *bufio.Reader) (Identity, error) {
-	_, err := conn.Write([]byte("DEST GENERATE SIGNATURE_TYPE=7\n"))
+	_, err := conn.Write([]byte(commands.GenerateDestination()))
 	if err != nil {
 		return Identity{}, err
 	}
@@ -94,8 +95,7 @@ func SaveIdentity(id Identity) error {
 }
 
 func CreateStreamSession(conn net.Conn, reader *bufio.Reader, sessionID string, privKey string) error {
-	cmd := fmt.Sprintf("SESSION CREATE STYLE=STREAM ID=%s DESTINATION=%s SIGNATURE_TYPE=7\n", sessionID, privKey)
-	_, err := conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(commands.CreateSession(sessionID, privKey)))
 	if err != nil {
 		return err
 	}
@@ -110,8 +110,7 @@ func CreateStreamSession(conn net.Conn, reader *bufio.Reader, sessionID string, 
 }
 
 func AcceptStream(conn net.Conn, reader *bufio.Reader, sessionID string) error {
-	cmd := fmt.Sprintf("STREAM ACCEPT ID=%s\n", sessionID)
-	_, err := conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(commands.AcceptStream(sessionID)))
 	if err != nil {
 		return err
 	}
@@ -124,8 +123,7 @@ func AcceptStream(conn net.Conn, reader *bufio.Reader, sessionID string) error {
 }
 
 func ConnectToStream(conn net.Conn, reader *bufio.Reader, sessionID, dest string) error {
-	cmd := fmt.Sprintf("STREAM CONNECT ID=%s DESTINATION=%s\n", sessionID, dest)
-	_, err := conn.Write([]byte(cmd))
+	_, err := conn.Write([]byte(commands.ConnectToStream(sessionID, dest)))
 	if err != nil {
 		return err
 	}

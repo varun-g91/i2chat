@@ -7,7 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
+
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -36,12 +37,8 @@ func main() {
 		}
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Print("Enter session ID: ")
-	scanner.Scan()
-	sessionID := strings.TrimSpace(scanner.Text())
-
-	if err := sam.CreateStreamSession(conn, reader, sessionID, id.PrivKey); err != nil {
+	sessionID := uuid.New()
+	if err := sam.CreateStreamSession(conn, reader, sessionID.String(), id.PrivKey); err != nil {
 		fmt.Println("Session create failed:", err)
 		return
 	}
@@ -50,6 +47,7 @@ func main() {
 	fmt.Println("Choose operation:")
 	fmt.Println("1. Accept Stream")
 	fmt.Println("2. Connect to Stream")
+	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	choice, _ := strconv.Atoi(scanner.Text())
 
